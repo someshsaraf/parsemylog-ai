@@ -2,6 +2,7 @@ import dash_bootstrap_components as dbc
 from dash import dcc, html
 from .utils import (
     create_run_button,
+    create_run_and_download_buttons,
     create_modal
 )
 
@@ -35,7 +36,7 @@ def create_control_card():
         children=[
             create_file_setting_layout(),
             html.Hr(),
-            create_run_button("pattern-btn"),
+            create_run_and_download_buttons("pattern-btn", "download-patterns-btn"),
             create_modal(
                 modal_id="pattern_exception_modal",
                 header="An Exception Occurred",
@@ -224,6 +225,7 @@ def pattern_page():
         },
         children=[
             create_pattern_layout(),
+            dcc.Download(id="download-patterns"),
         ]
     )
 layout = pattern_page()

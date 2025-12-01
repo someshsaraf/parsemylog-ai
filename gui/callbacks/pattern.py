@@ -3,12 +3,21 @@ import pandas as pd
 import plotly.express as px
 from pathlib import Path
 import numpy as np
+from datetime import datetime
+import json
+import base64
+import io
 
-from dash import ctx, html, Input, Output, State, callback, dash_table
+from dash import ctx, html, Input, Output, State, callback, dash_table, dcc
 import dash
 from gui.app_instance import dbm
 from logai.pattern import Pattern
 import plotly.graph_objects as go
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
 
 from logai.utils.constants import (
     UPLOAD_DIRECTORY
@@ -310,3 +319,116 @@ def update_y_timeseries(data, interval, result_df_path):
 
     title = f"Trend of Occurrence at Freq({freq})"
     return create_time_series(ts_df, "Linear", title)
+
+
+def generate_patterns_pdf(result_df, project_name, filename):
+    """Generate PDF report of all identified patterns"""
+    buffer = io.BytesIO()
+    
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        spaceAfter=30,
+    )
+    story.append(Paragraph(f"Log Pattern Analysis Report", title_style))
+    story.append(Spacer(1, 12))
+    
+    info_style = styles['Normal']
+    story.append(Paragraph(f"<b>Project:</b> {project_name}", info_style))
+    story.append(Paragraph(f"<b>File:</b> {filename}", info_style))
+    story.append(Paragraph(f"<b>Generated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", info_style))
+    story.append(Spacer(1, 20))
+    
+    total_loglines = len(result_df)
+    total_patterns = len(result_df["template"].unique())
+    story.append(Paragraph(f"<b>Summary:</b>", styles['Heading2']))
+    story.append(Paragraph(f"Total Log Lines: {total_loglines}", info_style))
+    story.append(Paragraph(f"Total Unique Patterns: {total_patterns}", info_style))
+    story.append(Spacer(1, 20))
+    
+    story.append(Paragraph("Pattern Details", styles['Heading2']))
+    story.append(Spacer(1, 12))
+    
+    pattern_counts = result_df["template"].value_counts()
+    
+    table_data = [['Count', 'Pattern Template', 'Occurrences', 'Percentage']]
+    
+    cell_style = ParagraphStyle(
+        'CellStyle',
+        parent=styles['Normal'],
+        fontSize=8,
+        leading=10,
+        wordWrap='LTR',
+        allowWidows=1,
+        allowOrphans=1,
+    )
+    
+    for index, (template, count) in enumerate(pattern_counts.items(), 1):
+        percentage = f"{(count/total_loglines)*100:.2f}%"
+        wrapped_template = Paragraph(template, cell_style)
+        table_data.append([str(index), wrapped_template, str(count), percentage])
+    
+    table = Table(table_data, colWidths=[0.5*inch, 3.5*inch, 1*inch, 1*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (0, -1), 'CENTER'),  # Center align Count column
+        ('ALIGN', (1, 0), (1, 0), 'LEFT'),     # Left align header
+        ('ALIGN', (2, 0), (-1, -1), 'LEFT'),   # Left align other columns
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('FONTSIZE', (0, 1), (0, -1), 8),     # Count column font
+        ('FONTSIZE', (2, 1), (-1, -1), 8),    # Other columns font
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 1), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+    ]))
+    
+    story.append(table)
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+@callback(
+    Output("download-patterns", "data"),
+    [Input("download-patterns-btn", "n_clicks")],
+    [
+        State("pattern-result-store", "data"),
+        State("file-select", "value"),
+        State("current-project-store", "data"),
+    ],
+    prevent_initial_call=True,
+)
+def download_patterns(n_clicks, result_df_path, filename, project_data):
+    if not n_clicks or not result_df_path or not filename or not project_data:
+        return dash.no_update
+    
+    try:
+        result_df = load_result_df(result_df_path)
+        if result_df.empty:
+            return dash.no_update
+        
+        project_name = project_data.get("project_name", "Unknown Project")
+        
+        pdf_buffer = generate_patterns_pdf(result_df, project_name, filename)
+        
+        pdf_string = base64.b64encode(pdf_buffer.read()).decode()
+        
+        return dcc.send_bytes(
+            base64.b64decode(pdf_string),
+            filename=f"patterns_{filename}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        )
+    
+    except Exception as e:
+        print(f"Error generating PDF: {str(e)}")
+        return dash.no_update

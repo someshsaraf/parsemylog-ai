@@ -35,6 +35,26 @@ def create_run_button(button_id):
                 ]
             )
 
+def create_run_and_download_buttons(run_button_id, download_button_id):
+    return dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.Div(
+                                children=[
+                                    dbc.Button([html.I(className="fas fa-bar-chart me-2"),"Run"], 
+                                             id=run_button_id, color="primary", outline=True, 
+                                             className="me-2"),
+                                    dbc.Button([html.I(className="fas fa-download me-2"),"Download Patterns"], 
+                                             id=download_button_id, color="success", outline=True)
+                                ],
+                            style={"textAlign": "center"},
+                            ),
+                        ]
+                    ),
+                ]
+            )
+
 
 def create_modal(modal_id, header, content, content_id, button_id):
     modal = html.Div(
